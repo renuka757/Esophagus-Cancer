@@ -1,0 +1,6 @@
+pca_scores=data.frame(pca$x[,1:2])
+pca_scores$sample=colnames(Total_count)
+pca_scores$PC1=scale(pca_scores$PC1)
+pca_scores$PC2=scale(pca_scores$PC2)
+outliers <- which(abs(pca_scores$PC1) > 2.8| abs(pca_scores$PC2) > 2.8)
+outliers
