@@ -1,0 +1,90 @@
+library(readxl)
+library(DESeq2)
+library(ggplot2)
+
+# Load coldata and count matrix
+coldata <- data.frame(read_excel("all_coldata.xlsx"), row.names = 1)
+countdata <- data.frame(read_excel("allmatrix.xlsx"), row.names = 1)
+
+# Filter and clean coldata
+new_coldata <- coldata[coldata$sample_type == "Solid Tissue Normal" & coldata$prior_treatment != "Yes", ]
+new_coldata$primary_diagnosis <- "Solid Tissue Normal"
+
+# Subset tumor types
+Tumor_adeno <- Tumor_coldata[Tumor_coldata$primary_diagnosis == "Adenocarcinoma", ]
+Tumor_squam <- Tumor_coldata[Tumor_coldata$primary_diagnosis == "Squamous cell carcinoma", ]
+
+# Combine into full metadata
+Total_coldata <- rbind(Tumor_adeno, Tumor_squam, new_coldata)
+
+# Filter countdata to match final coldata
+Total_count <- countdata[, rownames(Total_coldata)]
+
+# Check sample alignment
+stopifnot(rownames(Total_coldata) == colnames(Total_count))
+
+# Begin iterative outlier removal using PCA
+filtered_coldata <- Total_coldata
+filtered_countdata <- Total_count
+iteration <- 1
+
+repeat {
+  message(paste0("🔄 Iteration: ", iteration))
+  
+  # Create DESeq2 object
+  dds <- DESeqDataSetFromMatrix(countData = filtered_countdata,
+                                colData = filtered_coldata,
+                                design = ~ sample_type)
+  dds$sample_type <- relevel(dds$sample_type, ref = "Solid Tissue Normal")
+  
+  # Filter low-expressed genes
+  keep <- rowSums(counts(dds)) > 10
+  dds <- dds[keep, ]
+  
+  # Run DESeq (even if not doing DE analysis, needed for VST)
+  dds <- DESeq(dds)
+  
+  # Apply variance-stabilizing transformation
+  vsd <- varianceStabilizingTransformation(dds, blind = FALSE)
+  vsd_matrix <- assay(vsd)
+  
+  # PCA analysis
+  pca <- prcomp(t(vsd_matrix), scale. = TRUE)
+  pca_scores <- data.frame(pca$x[, 1:2])
+  pca_scores$sample <- colnames(filtered_countdata)
+  pca_scores$PC1 <- scale(pca_scores$PC1)
+  pca_scores$PC2 <- scale(pca_scores$PC2)
+  
+  # Add group (primary diagnosis) info
+  match_idx <- match(pca_scores$sample, rownames(filtered_coldata))
+  pca_scores$group <- filtered_coldata$primary_diagnosis[match_idx]
+  
+  # Plot PCA
+  p <- ggplot(pca_scores, aes(x = PC1, y = PC2, color = group, label = sample)) +
+    geom_point(size = 2) +
+    geom_text(size = 2, vjust = 1.5, hjust = 1.1, check_overlap = TRUE) +
+    ggtitle(paste("PCA - Iteration", iteration)) +
+    theme_minimal()
+  print(p)
+  
+  # Detect outliers beyond ±2.8 SD in PC1 or PC2
+  outliers <- which(abs(pca_scores$PC1) > 2.8 | abs(pca_scores$PC2) > 2.8)
+  
+  if (length(outliers) == 0) {
+    message("✅ No more outliers found.")
+    break
+  }
+  
+  outlier_samples <- pca_scores$sample[outliers]
+  message("🚨 Outliers found in iteration ", iteration, ": ", paste(outlier_samples, collapse = ", "))
+  
+  # Remove outlier samples
+  filtered_coldata <- filtered_coldata[!rownames(filtered_coldata) %in% outlier_samples, ]
+  filtered_countdata <- filtered_countdata[, rownames(filtered_coldata)]
+  
+  iteration <- iteration + 1
+}
+
+# Save final datasets
+write.csv(filtered_coldata, "Final_Coldata_After_Outlier_Removal.csv")
+write.csv(filtered_countdata, "Final_Countdata_After_Outlier_Removal.csv")
