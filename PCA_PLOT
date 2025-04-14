@@ -1,0 +1,48 @@
+#PCA plot
+Checking PCA plot of all non treated tumor samples (squamous cell carcinoma and adenocarcinoma) along with normal samples.
+I have used basic prcomp function for PCA PLOT
+library(readxl)
+coldata=data.frame(read_excel("Final_Coldata_After_Outlier_Removal.xlsx"),row.names = 1)
+countdata=data.frame(read_excel("allmatrix.xlsx"),row.names = 1)
+Tumor_adeno=Tumor_coldata[Tumor_coldata$primary_diagnosis=="Adenocarcinoma",]
+Tumor_squam=Tumor_coldata[Tumor_coldata$primary_diagnosis=="Squamous cell carcinoma",]
+Total_coldata=rbind(Tumor_adeno,Tumor_squam,new_coldata)
+rownames(Total_coldata)
+
+rownames(Total_coldata)
+
+Total_count=countdata[,row.names(Total_coldata)]
+
+rownames(Total_coldata)==colnames(Total_count)
+
+library(DESeq2)
+dds=DESeqDataSetFromMatrix(colData=Total_coldata,
+                           countData = Total_count,
+                           design=~sample_type)
+dds$sample_type=relevel(dds$sample_type,ref="Solid Tissue Normal")
+levels(dds$sample_type)
+
+keep=rowSums(counts(dds))>10
+dds=dds[keep,]
+
+dds=DESeq(dds)
+vsd=varianceStabilizingTransformation(dds,blind=TRUE)
+vsd_matrix=assay(vsd)
+library(ggplot2)
+n(dds$barcode)
+
+pca=prcomp(t(vsd_matrix),scale=TRUE)
+# plot(pca$x[,1],pca$x[,2])
+sample_group=dds$primary_diagnosis
+sample_info=dds$barcode
+pca_info=data.frame(PC2=pca$x[,2],
+                    PC3=pca$x[,3],
+                    sample_group,
+                    sample_info)
+
+
+
+ggplot(pca_info,(aes(x=PC2,y=PC3,colour=sample_group)))+
+  geom_point(size=2.0)+
+  ggtitle("PCA plot:Tumor and Normal samples PC2 PC3 after sample removal")
+ 
